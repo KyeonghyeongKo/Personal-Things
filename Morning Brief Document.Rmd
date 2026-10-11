@@ -1,0 +1,747 @@
+---
+title: "글로벌 증시 업종별 기여도 (2026.10.09)"
+mainfont: NanumGothic
+output:
+  html_document:
+      toc: true
+      toc_float: true
+      theme: cosmo
+---
+
+```{css CSS Settings, echo = FALSE}
+  #TOC {
+    max-width: fit-content;
+    white-space: nowrap;
+  }
+```
+
+```{r R Settings, include = FALSE} 
+
+##### Required Packages
+
+  library(knitr)
+  library(readxl)
+  library(dplyr)
+  library(kableExtra)
+  library(ggplot2)
+  library(plotly)
+  library(ggpubr)
+  library(data.tree)
+  library(imager)
+  library(DT)
+  library(DBI)
+  library(RSQLite)
+  library(jsonlite)
+
+##### Basic Settings
+
+  knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = 'center', out.width = '100%')  
+
+  invisible(Sys.setlocale("LC_TIME", "C")) 
+
+  # 작업 디렉토리를 Global_Talk로 고정 (Rmd가 R 폴더에 있으니 ".."가 Global_Talk)
+  knitr::opts_knit$set(root.dir = normalizePath(".."))
+  setwd(normalizePath(".."))   # 콘솔 Run도 같은 기준 쓰게 (원하면 유지)
+  
+  # 이제 모든 경로는 Global_Talk 기준
+  wd <- file.path(getwd(), "Data")
+  
+  file_name <- "Global Market Data.xlsx"
+  
+  db_path <- file.path("Data", "Global_Market.db")
+  con <- dbConnect(SQLite(), db_path)
+  #con = dbConnect(SQLite(), 'C:/Users/kyeonghyeong.ko/Desktop/Git_Home/Mirae/SQL_DB/Global_Market.db')
+
+##### Global Parameters  
+  
+  b = 'black'
+  w = 'white'
+  r = 'red'
+  g = '#01C929'
+  
+  mirae_01 = '#f58220'
+  mirae_02 = '#043b72'
+  mirae_03 = '#00a9ce'
+  mirae_04 = '#f0b26b'
+  mirae_05 = '#ae634e'
+  mirae_06 = '#84888b'
+  mirae_07 = '#0086b8'
+  mirae_08 = '#8dc8e8'
+  mirae_09 = '#cb6015'
+  mirae_10 = '#7ea0c3'
+  mirae_11 = '#c2ac97'
+  mirae_12 = '#cdcecb'
+  
+  fills = c('Positive_Bar' = mirae_01, 
+            'Negative_Bar' = mirae_02, 
+            'Market_Bar' = mirae_12)
+  
+  colours = c('Positive_Text' = b,
+              'Negative_Text' = mirae_03, 
+              'Market_Text' = b, 
+              'YTD_Current' = mirae_01, 
+              'YTD_Base' = mirae_02)
+
+  Sectors = c('Energy', 'Materials', 'Industrials', 'Consumer Discretionary', 'Consumer Staples', 'Health Care', 
+            'Financials', 'Information Technology', 'Media & Entertainment', 'Telecommunication Services', 'Utilities', 'Real Estate')
+  
+  base_date = '2026-10-08'
+  current_date = '2026-10-09'
+  
+##### Predefined Functions
+  
+  Basic_Table = function(df_input, column_align, row_green = FALSE, row_red = FALSE, row_mirae_3 = FALSE){
+    
+    table_ouput = df_input %>%
+      
+      kable(align = column_align, row.names = FALSE) %>%
+      
+      kable_styling(position = 'center') %>%
+      
+      row_spec(0, color = w, background = mirae_01)
+    
+      if (row_green[1]) {
+        
+      table_ouput = table_ouput %>% row_spec(row_green, color = g)
+      
+      }
+  
+      if (row_red[1]) {
+        
+      table_ouput = table_ouput %>% row_spec(row_red, color = r)
+      
+      }
+  
+      if (row_mirae_3[1]) {
+      
+      table_ouput = table_ouput %>% row_spec(row_mirae_3, color = mirae_03)
+      
+      }
+    
+    return(table_ouput)
+    
+  }
+  
+  SectorWise_RTD = function(df_input){
+    
+    df_2_plot = df_input %>% select(Sector, RTD) %>%
+      
+      mutate(bar_color = ifelse(RTD > df_input$RTD[1], 'Positive_Bar', 'Negative_Bar')) %>%
+      
+      mutate(text_color = ifelse(RTD > df_input$RTD[1], 'Positive_Text', 'Negative_Text')) 
+  
+    df_2_plot$bar_color[1] = 'Market_Bar'
+    
+    df_2_plot$text_color[1] = 'Market_Text' 
+    
+    df_2_plot = df_2_plot[order(df_2_plot$RTD, decreasing = TRUE),] %>%
+      
+      mutate(Sector = factor(Sector, levels = Sector))
+    
+    p = ggplot(data = df_2_plot, aes(x = Sector, y = RTD)) +
+      
+        geom_bar(stat = 'identity', aes(fill = bar_color)) +
+      
+        coord_flip() +
+        
+        geom_text(aes(label = paste0(round(RTD * 100, 2), '%'), color = text_color), size = 2.2) +
+        
+        labs(x = '', y = '', title = 'Sector Wise RTD') +
+        
+        scale_y_continuous(labels = scales::percent) +
+        
+        scale_fill_manual(values = fills) +
+        
+        scale_colour_manual(values = colours) + 
+        
+        theme_bw()
+      
+    return(p)
+    
+  }
+  
+  SectorWise_Contribution = function(df_input){
+    
+    df_2_plot = data.frame(Sector = df_input$`Sector`[2:nrow(df_input)],
+                           Contribution = df_input$`Contribution`[2:nrow(df_input)])
+    
+    df_2_plot = df_2_plot[order(df_2_plot$Contribution, decreasing = TRUE),] %>%
+      
+      mutate(id = seq_along(Contribution)) %>%
+      
+      mutate(bar_color = ifelse(Contribution > 0, 'Positive_Bar', 'Negative_Bar')) %>%
+      
+      mutate(text_color = ifelse(Contribution > 0, 'Positive_Text', 'Negative_Text')) %>%
+      
+      mutate(end = cumsum(Contribution)) %>%
+      
+      mutate(start = c(0, head(end, -1))) %>%
+      
+      mutate(Sector = factor(Sector, levels = Sector))
+    
+    p = ggplot(data = df_2_plot, aes(Sector)) +
+      
+        geom_rect(aes(x = Sector, xmin = id - 0.45, xmax = id + 0.45, ymin = end, ymax = start, fill = bar_color)) +
+        
+        coord_flip() +
+        
+        geom_text(aes(x = Sector, y = (start + end)/2, 
+                      label = paste0(round(df_2_plot$Contribution * 10000, 1), 'bp'),
+                      color = text_color), size = 2.2) +
+        
+        labs(x = '', y = '', title = 'Sector Wise Contribution') +
+        
+        scale_y_continuous(labels = scales::percent) +
+        
+        scale_fill_manual(values = fills) +
+        
+        scale_colour_manual(values = colours) + 
+        
+        theme_bw()
+      
+    return(p)
+  
+  }
+  
+  Yield_Curve_Change = function(df_input){
+    
+    df_input = df_input %>% 
+      
+      select(UST_Categories, YTD_Base, YTD_Current) %>%
+      
+      mutate(YTD_Base = YTD_Base / 100) %>%
+      
+      mutate(YTD_Current = YTD_Current / 100) %>%
+      
+      mutate(UST_Categories = factor(UST_Categories, levels = UST_Categories))
+  
+    p = ggplot(data = df_input, aes(x = UST_Categories, group = 1)) +
+      
+        geom_line(aes(y = YTD_Current, colour = 'YTD_Current'), linetype = 2) +
+      
+        geom_line(aes(y = YTD_Base, colour = 'YTD_Base'), linetype = 2) + 
+      
+        geom_point(aes(y = YTD_Current, colour = 'YTD_Current')) +
+      
+        geom_point(aes(y = YTD_Base, colour = 'YTD_Base')) + 
+    
+        geom_text(aes(y = 0.042, label = paste0(round((YTD_Current - YTD_Base) * 10000, 1), 'bp'), color = 'YTD_Current'), size = 3) +
+      
+        labs(x = '', y = '', title = 'UST Yield Curve 1D Change') +
+      
+        scale_y_continuous(labels = scales::percent) +
+      
+        scale_colour_manual(values = colours) + 
+      
+        theme_bw() +
+      
+        theme(plot.title = element_text(hjust = 0.5, size = 9),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor.x = element_blank(),
+              panel.grid.major.y = element_line(),
+              panel.grid.minor.y = element_blank(),
+              axis.text.x = element_text(size = 7),
+              axis.text.y = element_text(size = 7),
+              legend.position = 'None')
+    
+    return(p)  
+  
+  }
+  
+  json_to_dataframe <- function(db_connection, table_name, date, index_name) {
+  
+    # Define the SQL query
+    query <- paste0("SELECT data FROM ", table_name, " WHERE date = ? AND index_name = ?")
+  
+    # Prepare and execute the SQL statement
+    stmt <- dbSendQuery(db_connection, query)
+    dbBind(stmt, list(date, index_name))
+  
+    # Fetch the result
+    result <- dbFetch(stmt)
+  
+    # Clear the statement
+    dbClearResult(stmt)
+  
+    # Parse the JSON data into a data frame
+    parsed <- fromJSON(result$data[1], flatten = TRUE)
+  
+    # Replace NULL with NA
+    parsed_clean <- lapply(parsed, function(col) {
+      lapply(col, function(x) if (is.null(x)) NA else x)
+    })
+  
+    # Unlist all columns
+    parsed_unlisted <- lapply(parsed_clean, unlist)
+  
+    # Create data frame
+    df <- as.data.frame(parsed_unlisted, stringsAsFactors = FALSE)
+  
+    # Drop rows with any NA
+    df <- tidyr::drop_na(df)
+  
+    return(df)
+  
+  }
+  
+  df_sectorwise = function(db_connection, base_date, current_date, index_name){
+
+    df_base_date = json_to_dataframe(db_connection, 'LookThroughIndustryGroup', base_date, index_name) %>%
+      select(-FactSet_Symbol) %>%
+      rename(Last_Price_Base_Date = Last_Price)
+    
+    df_current_date = json_to_dataframe(db_connection, 'LookThroughIndustryGroup', current_date, index_name) %>%
+      select(-c(Weight, FactSet_Symbol)) %>%
+      rename(Last_Price_Current_Date = Last_Price)
+    
+    df = df_base_date %>% left_join(df_current_date, by = c('Sector')) %>%
+      mutate(RTD = Last_Price_Current_Date / Last_Price_Base_Date - 1) %>%
+      mutate(`Weight*RTD` = Weight * RTD) %>%
+      mutate(`Weight*RTD` = ifelse(row_number() == 1, sum(`Weight*RTD`[-1]), `Weight*RTD`)) %>%
+      mutate(Contribution = `Weight*RTD` * first(RTD) / first(`Weight*RTD`)) %>%
+      select(-c(Last_Price_Base_Date, Last_Price_Current_Date, `Weight*RTD`))
+    
+    return(df)
+  
+  }
+  
+  df_constituents_to_sectorwise <- function(db_connection, base_date, current_date, index_name, Sectors) {
+  
+    # Fetch data for base_date and current_date
+    df_base <- json_to_dataframe(db_connection, "All_Constituents", base_date, index_name) %>%
+      rename(Last_Price_Base = Last_Price)
+    
+    df_current <- json_to_dataframe(db_connection, "All_Constituents", current_date, index_name) %>%
+      select(-Constituent_Weight) %>%
+      rename(Last_Price_Current = Last_Price)
+    
+    # Merge the two data frames
+    df <- left_join(df_base, df_current, by = c("FactSet_Symbol", "Company_Name", "Sector", "Industry_Group", "Industry")) %>%
+      mutate(
+        RTD = Last_Price_Current / Last_Price_Base - 1,
+        Contribution = Constituent_Weight * RTD
+      ) %>%
+      select(-Last_Price_Base, -Last_Price_Current)
+    
+    # Create a grouped dataframe for sectors
+    df_grouped <- data.frame(Sector = Sectors)
+    
+    df_grouped <- df_grouped %>%
+      rowwise() %>%
+      mutate(
+        Weight = if (Sector %in% c("Media & Entertainment", "Telecommunication Services")) {
+          sum(df$Constituent_Weight[df$Industry_Group == Sector], na.rm = TRUE)
+        } else {
+          sum(df$Constituent_Weight[df$Sector == Sector], na.rm = TRUE)
+        },
+        Contribution = if (Sector %in% c("Media & Entertainment", "Telecommunication Services")) {
+          sum(df$Contribution[df$Industry_Group == Sector], na.rm = TRUE)
+        } else {
+          sum(df$Contribution[df$Sector == Sector], na.rm = TRUE)
+        }
+      ) %>%
+      ungroup() %>%
+      mutate(RTD = Contribution / Weight)
+    
+    # Add a "Market" row summarizing the data
+    new_row <- data.frame(
+      Sector = "Market",
+      Weight = sum(df$Constituent_Weight, na.rm = TRUE),
+      Contribution = sum(df$Contribution, na.rm = TRUE),
+      RTD = sum(df$Contribution, na.rm = TRUE) / sum(df$Constituent_Weight, na.rm = TRUE)
+    )
+    
+    # Combine the grouped data with the new row
+    df_result <- bind_rows(new_row, df_grouped)
+    
+    return(df_result)
+  }
+
+```
+
+* 지수 내 개별 종목, 섹터(GICS Lev 1), 산업군(GICS Lev2) 비중은 전일 종가 & USD 기준
+
+* S&P500 (PR, USD) / MSCI UK (PR, GBP) / MSCI EMU (PR, EUR) / MSCI Japan (PR, JPY) / MSCI EM (PR, USD)
+
+* FactSet 기준 MSCI 지수의 업데이트가 지연되는 경우, 개별 종목 비중(전일 종가 USD) & 개별 종목 수익률(PR, Local)을 사용해서 지수 수익률을 계산
+
+## 미국(S&P500) GICS 섹터별 기여도 
+***
+
+```{r US Sector Wise Contribution} 
+
+df = df_sectorwise(con, base_date, current_date, 'S&P500')
+
+#df = df_constituents_to_sectorwise(con, '2025-08-29', current_date, 'MSCI UK', Sectors)
+
+df_input = df[order(df$RTD, decreasing = TRUE),] %>%
+  
+  mutate(Weight = paste0(round(Weight * 100, 2), ' %')) %>%
+  
+  mutate(RTD = paste0(round(RTD * 100, 2), ' %')) %>%
+  
+  mutate(Contribution = paste0(round(Contribution * 100, 2), ' %'))
+
+Basic_Table(df_input = df_input, column_align = rep('c', ncol(df_input))) %>%
+  
+  row_spec(which(df_input$Sector == 'Market'), background = mirae_02, color = w)
+
+rm(df_input)
+
+ggarrange(SectorWise_RTD(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                     panel.grid.major.x = element_blank(),
+                                     panel.grid.minor.x = element_blank(),
+                                     panel.grid.major.y = element_line(),
+                                     panel.grid.minor.y = element_blank(),
+                                     axis.text.x = element_text(size = 7),
+                                     axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                     axis.ticks.y = element_blank(),
+                                     legend.position = 'none'),
+          SectorWise_Contribution(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                              panel.grid.major.x = element_blank(),
+                                              panel.grid.minor.x = element_blank(),
+                                              panel.grid.major.y = element_line(),
+                                              panel.grid.minor.y = element_blank(),
+                                              axis.text.x = element_text(size = 7),
+                                              axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                              axis.ticks.y = element_blank(),
+                                              legend.position = 'none',), nrow = 1, ncol = 2)
+
+```
+
+```{r results='asis', echo=FALSE}
+file_date <- gsub("-", "", current_date)
+
+summary_file <- sprintf(
+  "C:/Users/kyeonghyeong.ko/OneDrive - Mirae Asset Global Investments/QuantResearch_Document/Morning Brief/summaries/FactSet_%s_%s_summary.md",
+  file_date,
+  "US"
+)
+
+if (file.exists(summary_file)) {
+  cat(paste(readLines(summary_file, encoding = "UTF-8"), collapse = "\n"))
+} else {
+  cat(sprintf("* %s 요약 파일이 없습니다: %s", "US", basename(summary_file)))
+}
+``` 
+
+* 부동산, 자유소비재, 헬스케어 업종이 아웃퍼폼 `<>` 통신 업종 약세 (SpaceX의 저대역 주파수 인수)
+  - 부동산: 통신타워, 데이터센터, 셀프스토리지, 주거용 리츠
+  
+  - 자유소비재: 아마존 +3.29%, 테슬라 +2.05%
+    - 여행·호텔·OTA: Marriott (+1.33%), Hilton (+1.01%), Airbnb (+1.62%), Expedia (+1.51%)
+    - 외식·배달: DoorDash (+2.50%), Yum! Brands (+1.27%)
+    - 스포츠웨어·패션: lululemon (+1.96%), Ralph Lauren (+1.06%)
+  
+  - 헬스케어
+    - 대형 제약·바이오테크 (Pharma & Biotech): Johnson & Johnson (+1.93%), Merck (+2.26%), Eli Lilly (+0.83%), AbbVie (+1.49%), Pfizer (+1.65%), Amgen (+1.82%), Gilead (+2.77%), Vertex (+1.36%), Biogen (+3.33%), Regeneron (+0.94%), Moderna (mRNA, +14.21%), Viatris (+1.15%), Zoetis (동물의약, +2.37%)
+    - 헬스보험·의료 서비스 (Payers/Providers): Humana (+11.56%), UnitedHealth (+2.25%), Elevance Health (+2.93%), Centene (+1.27%), HCA Healthcare (+1.37%), McKesson (+0.92%), Cencora (+0.78%)
+    - 의료기기 (Medical Devices): Intuitive Surgical (+2.06%), Abbott (+1.13%), Boston Scientific (+1.64%), Medtronic (+0.83%), GE Healthcare (+2.37%), Edwards Lifesciences (+1.15%), ResMed (+1.46%), STERIS (+1.73%), IDEXX (+0.95%)
+    - 생명과학 장비·유전체 (Life Science Tools): Illumina (유전체 시퀀싱, +5.14%), Thermo Fisher (+0.93%), Danaher (+1.08%), Agilent (+1.41%), Waters (+1.08%), Mettler-Toledo (+1.34%), Revvity (+1.33%)
+    - 헬스케어 SaaS: Veeva Systems (+3.96%)
+
+## 영국(MSCI UK) GICS 섹터별 기여도 
+***
+
+```{r UK Sector Wise Contribution}
+
+df = df_sectorwise(con, base_date, current_date, 'MSCI UK')
+
+#df = df_constituents_to_sectorwise(con, base_date, current_date, 'MSCI UK', Sectors)
+
+df_input = df[order(df$RTD, decreasing = TRUE),] %>%
+  
+  mutate(Weight = paste0(round(Weight * 100, 2), ' %')) %>%
+  
+  mutate(RTD = paste0(round(RTD * 100, 2), ' %')) %>%
+  
+  mutate(Contribution = paste0(round(Contribution * 100, 2), ' %'))
+
+Basic_Table(df_input = df_input, column_align = rep('c', ncol(df_input))) %>%
+  
+  row_spec(which(df_input$Sector == 'Market'), background = mirae_02, color = w)
+
+rm(df_input)
+
+ggarrange(SectorWise_RTD(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                     panel.grid.major.x = element_blank(),
+                                     panel.grid.minor.x = element_blank(),
+                                     panel.grid.major.y = element_line(),
+                                     panel.grid.minor.y = element_blank(),
+                                     axis.text.x = element_text(size = 7),
+                                     axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                     axis.ticks.y = element_blank(),
+                                     legend.position = 'none'),
+          SectorWise_Contribution(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                              panel.grid.major.x = element_blank(),
+                                              panel.grid.minor.x = element_blank(),
+                                              panel.grid.major.y = element_line(),
+                                              panel.grid.minor.y = element_blank(),
+                                              axis.text.x = element_text(size = 7),
+                                              axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                              axis.ticks.y = element_blank(),
+                                              legend.position = 'none',), nrow = 1, ncol = 2)
+
+```
+
+## 유로존(MSCI EMU) GICS 섹터별 기여도 
+***
+
+```{r EMU Sector Wise Contribution}
+
+df = df_sectorwise(con, base_date, current_date, 'MSCI EMU')
+
+#df = df_constituents_to_sectorwise(con, base_date, current_date, 'MSCI EMU', Sectors)
+
+df_input = df[order(df$RTD, decreasing = TRUE),] %>%
+  
+  mutate(Weight = paste0(round(Weight * 100, 2), ' %')) %>%
+  
+  mutate(RTD = paste0(round(RTD * 100, 2), ' %')) %>%
+  
+  mutate(Contribution = paste0(round(Contribution * 100, 2), ' %'))
+
+Basic_Table(df_input = df_input, column_align = rep('c', ncol(df_input))) %>%
+  
+  row_spec(which(df_input$Sector == 'Market'), background = mirae_02, color = w)
+
+rm(df_input)
+
+ggarrange(SectorWise_RTD(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                     panel.grid.major.x = element_blank(),
+                                     panel.grid.minor.x = element_blank(),
+                                     panel.grid.major.y = element_line(),
+                                     panel.grid.minor.y = element_blank(),
+                                     axis.text.x = element_text(size = 7),
+                                     axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                     axis.ticks.y = element_blank(),
+                                     legend.position = 'none'),
+          SectorWise_Contribution(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                              panel.grid.major.x = element_blank(),
+                                              panel.grid.minor.x = element_blank(),
+                                              panel.grid.major.y = element_line(),
+                                              panel.grid.minor.y = element_blank(),
+                                              axis.text.x = element_text(size = 7),
+                                              axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                              axis.ticks.y = element_blank(),
+                                              legend.position = 'none',), nrow = 1, ncol = 2)
+
+```
+
+```{r results='asis', echo=FALSE}
+file_date <- gsub("-", "", current_date)
+
+summary_file <- sprintf(
+  "C:/Users/kyeonghyeong.ko/OneDrive - Mirae Asset Global Investments/QuantResearch_Document/Morning Brief/summaries/FactSet_%s_%s_summary.md",
+  file_date,
+  "Europe"
+)
+
+if (file.exists(summary_file)) {
+  cat(paste(readLines(summary_file, encoding = "UTF-8"), collapse = "\n"))
+} else {
+  cat(sprintf("* %s 요약 파일이 없습니다: %s", "Europe", basename(summary_file)))
+}
+```
+
+* 업종별로는 헬스케어, 산업재, 자유소비재, 소재 업종 아웃퍼폼 `<>` 통신 업종 약세
+  - 헬스케어
+    - 대형 제약 (빅파마): Bayer (+2.77%), Sanofi (+0.83%), Merck KGaA (+1.58%)
+    - 바이오·전문 제약: argenx (+3.23%), UCB (+0.84%), Abivax (+2.46%), Ipsen (+0.85%)
+    - 의료기기·진단 (Medtech/Diagnostics): Siemens Healthineers (+2.30%), Philips (+1.40%), bioMérieux (+3.48%), QIAGEN (+1.55%)
+    - 바이오프로세싱·수탁분석 (바이오 툴): Sartorius AG (+2.47%), Sartorius Stedim Biotech (+2.31%), Eurofins Scientific (+1.88%)
+    - 병원·투석 서비스 (Providers): Fresenius SE (+1.84%), Fresenius Medical Care (+2.12%)
+    - 안과·아이웨어: EssilorLuxottica (+2.34%)
+  
+  - 산업재
+    - 전력장비·전력화 (AI/그리드 캐펙스): Siemens AG (FA·복합, +2.97%), Schneider Electric (+2.03%), Siemens Energy (+2.01%)
+    - 항공·방산 (Aerospace & Defense): Safran (+1.74%), Leonardo (+2.21%), Thales (+1.21%), MTU Aero Engines (+1.51%), HENSOLDT (+2.06%), Dassault Aviation (+1.00%)
+    - 기계·자본재 (Machinery): KONE (+2.00%), Metso (+2.43%), GEA Group (+1.63%), Knorr-Bremse (+2.10%), Wärtsilä (+0.93%), Rational (+6.55%), Daimler Truck (상용차, +1.62%)
+    - 전문정보·인증 서비스 (Professional Services): Wolters Kluwer (+4.49%), Bureau Veritas (시험·인증, +3.56%)
+    - 물류·리스·유통: Deutsche Post / DHL (+1.93%), AerCap (항공기 리스, +1.34%), Rexel (전기자재 유통, +2.34%), Brenntag (+1.40%)
+  
+  - 자유소비재
+    - 완성차 (Autos): Mercedes-Benz (+1.45%), BMW (+2.07%), Volkswagen (+2.10%), Renault (+1.77%), Porsche AG (+1.42%), Porsche Automobil Holding (지주, +2.20%), Ferrari (럭셔리, +1.47%)
+    - 럭셔리: Hermès (+1.62%), Kering (+2.35%), Moncler (+1.19%)
+    - 의류(SPA)·스포츠웨어·이커머스: Inditex (자라, +1.93%), , adidas (+2.29%), Zalando (+4.34%)
+    - 여행 IT·호텔: Amadeus IT Group (GDS, +1.99%), Accor (+1.34%)
+    - 인터넷 플랫폼·투자지주: Prosus (Tencent 프록시, +3.29%)
+  
+  - 소재
+    - 산업가스: Air Liquide (+1.04%)
+    - 향료·식품 원료: DSM-Firmenich (+2.81%), Symrise (+1.43%)
+    - 종합·특수화학: Evonik (+1.81%), Akzo Nobel (+0.84%), Syensqo (+0.95%)
+    - 철강: ArcelorMittal (+5.64%)
+    - 시멘트·건자재: Heidelberg Materials (+1.79%), Buzzi (+2.39%)
+    - 제지·펄프: UPM-Kymmene (+1.41%)
+  
+## 일본(MSCI Japan) GICS 섹터별 기여도
+***
+
+```{r JP Sector Wise Contribution}
+
+df = df_sectorwise(con, base_date, current_date, 'MSCI Japan')
+
+#df = df_constituents_to_sectorwise(con, base_date, current_date, 'MSCI Japan', Sectors)
+
+df_input = df[order(df$RTD, decreasing = TRUE),] %>%
+  
+  mutate(Weight = paste0(round(Weight * 100, 2), ' %')) %>%
+  
+  mutate(RTD = paste0(round(RTD * 100, 2), ' %')) %>%
+  
+  mutate(Contribution = paste0(round(Contribution * 100, 2), ' %'))
+
+Basic_Table(df_input = df_input, column_align = rep('c', ncol(df_input))) %>%
+  
+  row_spec(which(df_input$Sector == 'Market'), background = mirae_02, color = w)
+
+rm(df_input)
+
+ggarrange(SectorWise_RTD(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                     panel.grid.major.x = element_blank(),
+                                     panel.grid.minor.x = element_blank(),
+                                     panel.grid.major.y = element_line(),
+                                     panel.grid.minor.y = element_blank(),
+                                     axis.text.x = element_text(size = 7),
+                                     axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                     axis.ticks.y = element_blank(),
+                                     legend.position = 'none'),
+          SectorWise_Contribution(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                              panel.grid.major.x = element_blank(),
+                                              panel.grid.minor.x = element_blank(),
+                                              panel.grid.major.y = element_line(),
+                                              panel.grid.minor.y = element_blank(),
+                                              axis.text.x = element_text(size = 7),
+                                              axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                              axis.ticks.y = element_blank(),
+                                              legend.position = 'none',), nrow = 1, ncol = 2)
+
+```
+
+```{r results='asis', echo=FALSE}
+file_date <- gsub("-", "", current_date)
+
+summary_file <- sprintf(
+  "C:/Users/kyeonghyeong.ko/OneDrive - Mirae Asset Global Investments/QuantResearch_Document/Morning Brief/summaries/Bloomberg_%s_%s_summary.md",
+  file_date,
+  "Japan"
+)
+
+if (file.exists(summary_file)) {
+  cat(paste(readLines(summary_file, encoding = "UTF-8"), collapse = "\n"))
+} else {
+  cat(sprintf("* %s 요약 파일이 없습니다: %s", "Japan", basename(summary_file)))
+}
+```
+
+* 업종별로는 미디어, 필수소비재, 산업재 업종이 아웃퍼폼 `<>` 통신, 금융 업종 약세
+  - 미디어
+    - 게임 (콘솔·개발·퍼블리싱): Nintendo (+3.76%), KONAMI (+3.54%), Capcom (+2.16%), NEXON (+1.50%)
+    - 영화·콘텐츠: Toho (+0.81%)
+    - 인터넷 플랫폼·포털: LY Corporation (야후재팬·라인, +3.71%)
+  
+  - 필수소비재
+    - 담배: Japan Tobacco (+3.88%)
+    - 식품 (Food): Ajinomoto (+2.00%), Kikkoman (+1.07%)
+    - 주류·음료: Kirin Holdings (+1.80%), Asahi Group (+1.35%), Suntory Beverage & Food (+1.15%)
+    - 생활용품·화장품: Kao (+0.99%), Shiseido (+1.29%)
+  
+  - 산업재
+    - 인력·HR 플랫폼: Recruit Holdings (+3.23%)
+    - 전력·IT·인프라 복합: Hitachi (+1.29%)
+    - 통신·투자지주: Hikari Tsushin (+2.09%)
+    - 해운 (Shipping): Mitsui O.S.K. Lines (+2.57%), K-Line (+2.74%), NYK (+1.83%)
+    - 팩토리 오토메이션·기계: Fanuc (+1.40%), SMC (+1.87%), Daifuku (+1.00%), Ebara (+1.42%), IHI (중공업, +1.37%)
+    - 철도 (Railways): Hankyu Hanshin (+2.12%), JR서일본 (+1.24%)
+
+## 신흥국(MSCI EM) GICS 섹터별 기여도
+***
+
+```{r EM Sector Wise Contribution}
+
+df = df_sectorwise(con, base_date, current_date, 'MSCI EM')
+
+#df = df_constituents_to_sectorwise(con, base_date, current_date, 'MSCI EM', Sectors)
+
+df_input = df[order(df$RTD, decreasing = TRUE),] %>%
+  
+  mutate(Weight = paste0(round(Weight * 100, 2), ' %')) %>%
+  
+  mutate(RTD = paste0(round(RTD * 100, 2), ' %')) %>%
+  
+  mutate(Contribution = paste0(round(Contribution * 100, 2), ' %'))
+
+Basic_Table(df_input = df_input, column_align = rep('c', ncol(df_input))) %>%
+  
+  row_spec(which(df_input$Sector == 'Market'), background = mirae_02, color = w)
+
+rm(df_input)
+
+ggarrange(SectorWise_RTD(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                     panel.grid.major.x = element_blank(),
+                                     panel.grid.minor.x = element_blank(),
+                                     panel.grid.major.y = element_line(),
+                                     panel.grid.minor.y = element_blank(),
+                                     axis.text.x = element_text(size = 7),
+                                     axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                     axis.ticks.y = element_blank(),
+                                     legend.position = 'none'),
+          SectorWise_Contribution(df) + theme(plot.title = element_text(hjust = 0.5, size = 8),
+                                              panel.grid.major.x = element_blank(),
+                                              panel.grid.minor.x = element_blank(),
+                                              panel.grid.major.y = element_line(),
+                                              panel.grid.minor.y = element_blank(),
+                                              axis.text.x = element_text(size = 7),
+                                              axis.text.y = element_text(size = 7, margin = margin(t = -20), color = mirae_02, face = 'bold'),
+                                              axis.ticks.y = element_blank(),
+                                              legend.position = 'none',), nrow = 1, ncol = 2)
+
+```
+
+```{r results='asis', echo=FALSE}
+file_date <- gsub("-", "", current_date)
+
+summary_file <- sprintf(
+  "C:/Users/kyeonghyeong.ko/OneDrive - Mirae Asset Global Investments/QuantResearch_Document/Morning Brief/summaries/FactSet_%s_%s_summary.md",
+  file_date,
+  "Asia_Pacific"
+)
+
+if (file.exists(summary_file)) {
+  cat(paste(readLines(summary_file, encoding = "UTF-8"), collapse = "\n"))
+} else {
+  cat(sprintf("* %s 요약 파일이 없습니다: %s", "Asia_Pacific", basename(summary_file)))
+}
+```
+
+* 업종별로는 미디어, 자유소비재, 소재 업종이 아웃퍼폼
+  - 미디어
+    - 인터넷 플랫폼·포털: Tencent (+3.26%), Baidu (+1.03%)
+    - 숏폼·동영상 플랫폼: Kuaishou (+5.47%), Bilibili (+4.06%)
+    - 게임 (개발·퍼블리싱): NetEase (+3.75%), Kingsoft (+4.23%), Zhejiang Century Huatong (+2.56%), Giant Network (+4.01%), Kingnet (+3.31%), 37 Interactive (+1.72%), CD Projekt (+4.16%)
+    - 음악·미디어·콘텐츠: Tencent Music (+5.28%), Beijing Enlight Media (+4.82%)
+    - AI 소프트웨어·응용: Kunlun Tech (+7.27%)
+    - 광고·마케팅: BlueFocus (+6.80%), Focus Media (+3.59%)
+    - 온라인 채용·분류광고: Info Edge India (+2.03%)
+  
+  - 자유소비재
+    - 이커머스·온라인 리테일: Alibaba (+2.59%), PDD Holdings (+3.95%), Vipshop (+1.42%), Allegro (+2.62%), Naspers (Tencent 프록시, +2.84%), FSN E-Commerce / Nykaa (+2.85%)
+    - 전기차·완성차 (EV/Autos): BYD A (+3.95%) / H (+3.70%), Geely (+3.56%), Li Auto (+3.81%), XPeng (+2.24%), Leapmotor (+2.35%), Great Wall H (+3.91%), Maruti Suzuki (+1.54%), Mahindra & Mahindra (+0.80%), Tata Motors PV (+2.14%)
+    - 이륜차: Eicher Motors (로열엔필드, +3.55%), Bajaj Auto (+1.42%), Hero Motocorp (+1.01%), Yadea (+4.73%)
+    - 로컬커머스·외식·여행 (O2O/Travel): Meituan (+3.03%), Yum China (+5.13%), Trip.com (+2.84%), H World (호텔, +3.49%), Haidilao (+3.63%), Tongcheng Travel (+1.98%), Allwyn (+2.11%)
+    - 스포츠웨어·의류 (중국 소비): Li Ning (+3.91%), ANTA Sports (+1.18%), Bosideng (+3.16%), Shenzhou International (OEM, +1.05%)
+    - 주얼리·소매 리테일: Laopu Gold (+4.85%), Chow Tai Fook (+3.52%), Titan (+0.97%), Trent (+1.42%), Lenskart (+3.63%), LPP (+2.62%), Pepkor (+2.13%), MINISO (+1.01%), Falabella (+1.38%)
+  
+  - 소재
+    - 금 (Gold): AngloGold Ashanti (+4.20%), Gold Fields (+2.52%), Harmony Gold (+3.28%), Zijin Gold International (+7.71%), China Gold International (+3.90%), Zhaojin Mining H (+6.54%), Shandong Gold H (+6.13%), Aura Minerals (+10.63%), Buenaventura (+3.28%), Industrias Peñoles (은, +3.85%)
+    - 구리 (Copper): Southern Copper (+5.31%), Grupo Mexico (+5.26%), KGHM (+5.68%), Jiangxi Copper H (+1.96%), CMOC A (+3.67%) / H (+2.73%), MMG (+2.59%)
+    - 복합 광산 (Diversified): Zijin Mining A (+4.87%) / H (+5.31%), Vale (+0.38%), Vedanta (+4.11%), Sibanye Stillwater (PGM, +1.51%)
+    - 철강·알루미늄: Gerdau (+3.71%), Tata Steel (+1.22%), APL Apollo Tubes (+2.59%), Press Metal (+1.54%)    
+    - 시멘트·건자재: UltraTech Cement (+2.05%), Siam Cement (+3.47%), Cemex (+1.03%), Grasim (+1.05%), Ambuja (+2.34%), Shree Cement (+2.53%), CNBM H (+1.14%)
+  
+  
+  
+  
+
+
